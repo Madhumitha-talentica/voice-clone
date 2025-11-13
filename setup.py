@@ -26,11 +26,12 @@ setup(name='MyShell-OpenVoice',
 
       python_requires='>=3.9',
       install_requires=[
-            'librosa==0.9.1',
+            # Updated numpy pin (>=1.22.4,<1.24) to satisfy pandas wheels used by gradio
+            'numpy>=1.22.4,<1.24',
+            'librosa==0.9.1',  # compatible with numpy <1.24
             'faster-whisper==0.9.0',
             'pydub==0.25.1',
             'wavmark==0.0.3',
-            'numpy==1.22.0',
             'eng_to_ipa==0.0.2',
             'inflect==7.0.0',
             'unidecode==1.3.7',
@@ -39,7 +40,8 @@ setup(name='MyShell-OpenVoice',
             'cn2an==0.5.22',
             'jieba==0.42.1',
             'gradio==3.48.0',
-            'langid==1.1.6'
+            'langid==1.1.6',
+            'pandas<2.2'  # ensure a pandas version compatible with numpy<1.24
       ],
       zip_safe=False
       )
