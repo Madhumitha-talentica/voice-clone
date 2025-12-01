@@ -62,14 +62,21 @@ class SpeakerSimilarity:
             print(f"Error: One or both audio files not found ({file1_path}, {file2_path}).")
             return -1.0
 
-        # Create embeddings
-        embedding1 = self.model.encode_file(file1_path)
-        embedding2 = self.model.encode_file(file2_path)
+        # Use SpeechBrain's verification API for compatibility across versions
+        try:
+            if hasattr(self.model, "verify_files"):
+                score, prediction = self.model.verify_files(file1_path, file2_path)
+                return float(score)
+            # Some versions expose 'verify_paths' instead
+            if hasattr(self.model, "verify_paths"):
+                score, prediction = self.model.verify_paths(file1_path, file2_path)
+                return float(score)
+        except Exception as e:
+            print(f"Speaker verification failed: {e}")
+            return -1.0
 
-        # Cosine similarity
-        similarity = torch.nn.functional.cosine_similarity(embedding1, embedding2)
-        
-        return similarity.item()
+        print("Error: SpeakerRecognition model does not support a verification API (verify_files/verify_paths).")
+        return -1.0
 
 # ========================================================================================
 # 2. ASR (Content Preservation)
