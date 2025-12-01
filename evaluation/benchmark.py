@@ -293,6 +293,22 @@ def run_batch_benchmark(csv_path, config_path, ckpt_path, output_dir="outputs", 
     print("\nReminder: Higher similarity is better. Lower WER is better.")
     print("="*80)
 
+    # --- Save Results to CSV ---
+    try:
+        results_path = os.path.join(output_dir, "benchmark_results.csv")
+        results_df.to_csv(results_path, index=False)
+        summary_path = os.path.join(output_dir, "benchmark_summary.csv")
+        pd.DataFrame([
+            {
+                "average_similarity": avg_similarity if avg_similarity is not None else float('nan'),
+                "average_wer": avg_wer if avg_wer is not None else float('nan')
+            }
+        ]).to_csv(summary_path, index=False)
+        print(f"\nResults saved: {results_path}")
+        print(f"Summary saved: {summary_path}")
+    except Exception as e:
+        print(f"WARNING: Failed to save CSV outputs: {e}")
+
 
 def setup_dummy_environment():
     """Creates dummy audio files and directories for demonstration."""
