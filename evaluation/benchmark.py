@@ -251,6 +251,7 @@ def run_batch_benchmark(csv_path, config_path, ckpt_path, output_dir="outputs", 
         results.append({
             "source": source_audio,
             "target": target_audio,
+            "converted": converted_audio_path,
             "similarity": similarity_score,
             "wer": wer_score
         })
