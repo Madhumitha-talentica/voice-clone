@@ -337,6 +337,6 @@ if __name__ == '__main__':
         csv_path="benchmark_data.csv",
         config_path=converter_config_path,
         ckpt_path=converter_ckpt_path,
-        batch_size=2  # Set to None to run all tasks in the CSV
+        batch_size=None  # Run all tasks in the CSV
     )
 
