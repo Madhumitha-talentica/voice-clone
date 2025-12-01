@@ -167,8 +167,12 @@ def run_batch_benchmark(csv_path, config_path, ckpt_path, output_dir="outputs", 
     speaker_eval = SpeakerSimilarity(device=device)
     content_eval = ContentPreservation(device=device)
     
-    if not speaker_eval.model or not content_eval.model:
-        print("FATAL: Could not load one or more evaluation models. Aborting.")
+    if not speaker_eval.model:
+        print("WARNING: Speaker similarity model failed to load; similarity will be skipped.")
+    if not content_eval.model:
+        print("WARNING: ASR (Whisper) model failed to load; WER will be skipped.")
+    if not speaker_eval.model and not content_eval.model:
+        print("FATAL: No evaluation models available. Aborting.")
         return
 
     # --- 2. Read and Prepare Data ---
@@ -218,15 +222,23 @@ def run_batch_benchmark(csv_path, config_path, ckpt_path, output_dir="outputs", 
         )
         print(f" - Converted audio saved to {converted_audio_path}")
 
-        # B. Evaluate Speaker Similarity
-        print(" - Evaluating speaker similarity...")
-        similarity_score = speaker_eval.calculate_similarity(converted_audio_path, target_audio)
-        print(f" - Similarity Score: {similarity_score:.4f}")
+        # B. Evaluate Speaker Similarity (if available)
+        similarity_score = None
+        if speaker_eval.model:
+            print(" - Evaluating speaker similarity...")
+            similarity_score = speaker_eval.calculate_similarity(converted_audio_path, target_audio)
+            print(f" - Similarity Score: {similarity_score:.4f}")
+        else:
+            print(" - Skipping speaker similarity (model unavailable).")
 
-        # C. Evaluate Content Preservation
-        print(" - Evaluating content preservation (WER)...")
-        wer_score = content_eval.calculate_wer(converted_audio_path, ground_truth)
-        print(f" - Word Error Rate (WER): {wer_score:.4f}")
+        # C. Evaluate Content Preservation (if available)
+        wer_score = None
+        if content_eval.model:
+            print(" - Evaluating content preservation (WER)...")
+            wer_score = content_eval.calculate_wer(converted_audio_path, ground_truth)
+            print(f" - Word Error Rate (WER): {wer_score:.4f}")
+        else:
+            print(" - Skipping WER evaluation (ASR model unavailable).")
         
         results.append({
             "source": source_audio,
@@ -248,16 +260,28 @@ def run_batch_benchmark(csv_path, config_path, ckpt_path, output_dir="outputs", 
     # Create a DataFrame for easy viewing
     results_df = pd.DataFrame(results)
     
-    # Calculate Averages
-    avg_similarity = results_df['similarity'].mean()
-    avg_wer = results_df['wer'].mean()
+    # Calculate Averages (ignore None values)
+    if 'similarity' in results_df.columns:
+        avg_similarity = results_df['similarity'].dropna().mean()
+    else:
+        avg_similarity = None
+    if 'wer' in results_df.columns:
+        avg_wer = results_df['wer'].dropna().mean()
+    else:
+        avg_wer = None
 
     print("\n--- Individual Results ---")
     print(results_df.to_string(index=False))
     
     print("\n--- Average Scores ---")
-    print(f"Average Speaker Similarity: {avg_similarity:.4f}")
-    print(f"Average Word Error Rate (WER): {avg_wer:.4f}")
+    if avg_similarity is not None:
+        print(f"Average Speaker Similarity: {avg_similarity:.4f}")
+    else:
+        print("Average Speaker Similarity: n/a (model unavailable)")
+    if avg_wer is not None:
+        print(f"Average Word Error Rate (WER): {avg_wer:.4f}")
+    else:
+        print("Average Word Error Rate (WER): n/a (model unavailable)")
     print("\nReminder: Higher similarity is better. Lower WER is better.")
     print("="*80)
 
