@@ -4,16 +4,40 @@ import random
 import argparse
 from tqdm import tqdm
 
-def find_transcript(transcript_file, audio_filename):
-    """Finds the transcript for a specific audio file within a chapter's transcript file."""
+def find_transcript(chapter_path, audio_filename):
+    """
+    Finds the transcript for a specific audio file within a chapter's transcript file.
+    This is made more robust to handle different naming conventions.
+    """
     base_name = os.path.splitext(audio_filename)[0]
+    
+    # Find the transcript file, which could have different extensions
+    transcript_file = None
+    for f in os.listdir(chapter_path):
+        if f.endswith(('.tsv', '.txt')) and 'trans' in f:
+            transcript_file = os.path.join(chapter_path, f)
+            break
+    
+    if not transcript_file:
+        return None
+
     try:
         with open(transcript_file, 'r', encoding='utf-8') as f:
             for line in f:
-                # Format is often: 123_456_000001_000000 | 123_456 | "transcript"
-                parts = line.strip().split('|')
-                if len(parts) >= 3 and parts[0].strip() == base_name:
-                    return parts[2].strip().strip('"')
+                # Handle both tab-separated and pipe-separated formats
+                parts = [p.strip() for p in line.strip().replace('|', '\t').split('\t') if p.strip()]
+                
+                if not parts:
+                    continue
+                
+                # The audio file name is usually the first part
+                file_id = parts[0]
+                
+                if file_id == base_name:
+                    # The transcript is usually the last part
+                    transcript = parts[-1]
+                    # Clean up quotes
+                    return transcript.strip().strip('"')
     except FileNotFoundError:
         return None
     return None
@@ -36,60 +60,65 @@ def create_benchmark_csv(libritts_path, output_csv, num_samples=50):
 
     # --- 1. Discover all speakers and their utterances ---
     speaker_files = {}
-    for speaker_id in os.listdir(libritts_path):
-        speaker_path = os.path.join(libritts_path, speaker_id)
-        if not os.path.isdir(speaker_path):
-            continue
+    print("Discovering speakers and utterances...")
+    all_speaker_dirs = [os.path.join(libritts_path, d) for d in os.listdir(libritts_path) if os.path.isdir(os.path.join(libritts_path, d))]
+
+    for speaker_path in tqdm(all_speaker_dirs, desc="Scanning Speakers"):
+        speaker_id = os.path.basename(speaker_path)
         
-        speaker_files[speaker_id] = []
         for chapter_id in os.listdir(speaker_path):
             chapter_path = os.path.join(speaker_path, chapter_id)
             if not os.path.isdir(chapter_path):
-                continue
-            
-            # Find the transcript file for the chapter
-            # It's usually named speaker_id-chapter_id.trans.tsv or similar
-            transcript_file = None
-            for f in os.listdir(chapter_path):
-                if f.endswith('.tsv'):
-                    transcript_file = os.path.join(chapter_path, f)
-                    break
-            
-            if transcript_file is None:
                 continue
 
             for filename in os.listdir(chapter_path):
                 if filename.endswith(".wav"):
                     audio_path = os.path.join(chapter_path, filename)
-                    transcript = find_transcript(transcript_file, filename)
+                    transcript = find_transcript(chapter_path, filename)
                     if transcript:
+                        if speaker_id not in speaker_files:
+                            speaker_files[speaker_id] = []
                         speaker_files[speaker_id].append({
                             "audio_path": audio_path,
                             "transcript": transcript
                         })
 
-    speaker_ids = list(speaker_files.keys())
-    if len(speaker_ids) < 2:
-        print("Error: Fewer than 2 speakers found. Cannot create source/target pairs.")
+    # Filter out speakers with no valid utterances
+    valid_speaker_ids = [sid for sid, files in speaker_files.items() if files]
+    
+    if len(valid_speaker_ids) < 2:
+        print("Error: Fewer than 2 speakers with valid utterances found. Cannot create source/target pairs.")
+        print(f"Found {len(speaker_files)} total speaker folders, but only {len(valid_speaker_ids)} had usable content.")
         return
 
-    print(f"Found {len(speaker_ids)} speakers.")
+    print(f"Found {len(valid_speaker_ids)} speakers with valid audio and transcripts.")
 
     # --- 2. Create benchmark pairs ---
     benchmark_data = []
     print(f"Generating {num_samples} benchmark samples...")
     
-    with tqdm(total=num_samples) as pbar:
-        while len(benchmark_data) < num_samples:
+    with tqdm(total=num_samples, desc="Generating Samples") as pbar:
+        attempts = 0
+        while len(benchmark_data) < num_samples and attempts < num_samples * 100:
+            attempts += 1
             try:
                 # Pick a random source speaker and a different target speaker
-                source_speaker_id, target_speaker_id = random.sample(speaker_ids, 2)
+                source_speaker_id, target_speaker_id = random.sample(valid_speaker_ids, 2)
 
                 # Pick a random utterance from the source speaker
                 source_utterance = random.choice(speaker_files[source_speaker_id])
                 
                 # Pick a random utterance from the target speaker (for their voice timbre)
                 target_utterance = random.choice(speaker_files[target_speaker_id])
+
+                # Check for duplicates
+                is_duplicate = False
+                for item in benchmark_data:
+                    if item['source_audio'] == source_utterance['audio_path'] and item['target_audio'] == target_utterance['audio_path']:
+                        is_duplicate = True
+                        break
+                if is_duplicate:
+                    continue
 
                 benchmark_data.append({
                     "source_audio": source_utterance["audio_path"],
@@ -98,8 +127,12 @@ def create_benchmark_csv(libritts_path, output_csv, num_samples=50):
                 })
                 pbar.update(1)
             except (IndexError, ValueError):
-                # This can happen if a speaker has no valid utterances
+                # This can happen if a speaker has no valid utterances, though we filtered already.
                 continue
+    
+    if len(benchmark_data) < num_samples:
+        print(f"\nWarning: Could only generate {len(benchmark_data)} samples out of the requested {num_samples}.")
+        print("This might happen if the dataset is very small or speakers have few utterances.")
 
     # --- 3. Save to CSV ---
     df = pd.DataFrame(benchmark_data)
