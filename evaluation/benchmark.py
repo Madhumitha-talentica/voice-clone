@@ -209,9 +209,10 @@ def run_batch_benchmark(csv_path, config_path, ckpt_path, output_dir="outputs", 
 
         # A. Run Voice Conversion
         print(" - Running voice conversion...")
-        # Extract speaker embedding (SE) from the target speaker
-        target_se, _ = converter.extract_se(target_audio, se_save_path=None)
-        src_se, _ = converter.extract_se(source_audio, se_save_path=None)
+        # Extract speaker embedding (SE) from source and target speakers
+        # ToneColorConverter.extract_se returns a single tensor (embedding)
+        target_se = converter.extract_se(target_audio, se_save_path=None)
+        src_se = converter.extract_se(source_audio, se_save_path=None)
         # Convert the source audio with the target's tone color
         converter.convert(
             audio_src_path=source_audio, 
