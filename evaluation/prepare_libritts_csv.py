@@ -99,11 +99,16 @@ def create_benchmark_csv(libritts_path, output_csv, num_samples=50):
     
     with tqdm(total=num_samples, desc="Generating Samples") as pbar:
         attempts = 0
-        while len(benchmark_data) < num_samples and attempts < num_samples * 100:
+        max_attempts = max(num_samples * 100, 5000)
+        while len(benchmark_data) < num_samples and attempts < max_attempts:
             attempts += 1
             try:
                 # Pick a random source speaker and a different target speaker
                 source_speaker_id, target_speaker_id = random.sample(valid_speaker_ids, 2)
+
+                # Safeguard: ensure there are utterances for both speakers
+                if not speaker_files.get(source_speaker_id) or not speaker_files.get(target_speaker_id):
+                    continue
 
                 # Pick a random utterance from the source speaker
                 source_utterance = random.choice(speaker_files[source_speaker_id])
@@ -129,6 +134,48 @@ def create_benchmark_csv(libritts_path, output_csv, num_samples=50):
             except (IndexError, ValueError):
                 # This can happen if a speaker has no valid utterances, though we filtered already.
                 continue
+
+            # If we've made a lot of attempts without progress, switch to a deterministic fallback
+            if attempts % 250 == 0 and len(benchmark_data) == 0:
+                print(f"No samples added after {attempts} attempts; switching to deterministic pairing.")
+                # Deterministic fallback: iterate unique speaker pairs and take the first available utterance
+                shuffled = valid_speaker_ids[:]
+                random.shuffle(shuffled)
+                made_progress = False
+                for i in range(len(shuffled)):
+                    if len(benchmark_data) >= num_samples:
+                        break
+                    for j in range(i + 1, len(shuffled)):
+                        if len(benchmark_data) >= num_samples:
+                            break
+                        src_id = shuffled[i]
+                        tgt_id = shuffled[j]
+                        src_list = speaker_files.get(src_id) or []
+                        tgt_list = speaker_files.get(tgt_id) or []
+                        if not src_list or not tgt_list:
+                            continue
+                        # Use first utterance deterministically to avoid any RNG issues
+                        src_utt = src_list[0]
+                        tgt_utt = tgt_list[0]
+                        # Skip duplicates
+                        duplicate = False
+                        for item in benchmark_data:
+                            if item['source_audio'] == src_utt['audio_path'] and item['target_audio'] == tgt_utt['audio_path']:
+                                duplicate = True
+                                break
+                        if duplicate:
+                            continue
+                        benchmark_data.append({
+                            "source_audio": src_utt["audio_path"],
+                            "target_audio": tgt_utt["audio_path"],
+                            "ground_truth_transcript": src_utt["transcript"]
+                        })
+                        pbar.update(1)
+                        made_progress = True
+                if not made_progress:
+                    print("Deterministic fallback could not assemble any pairs. Please verify dataset structure.")
+                # Exit the while loop if we have enough samples (or no progress possible)
+                break
     
     if len(benchmark_data) < num_samples:
         print(f"\nWarning: Could only generate {len(benchmark_data)} samples out of the requested {num_samples}.")
