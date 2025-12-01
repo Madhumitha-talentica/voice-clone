@@ -1,0 +1,3 @@
+source_audio,target_audio,ground_truth_transcript
+test_audio/source/source1.wav,test_audio/target/target1.wav,"The quick brown fox jumps over the lazy dog"
+test_audio/source/source2.wav,test_audio/target/target2.wav,"How much wood would a woodchuck chuck if a woodchuck could chuck wood"

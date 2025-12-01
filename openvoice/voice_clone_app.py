@@ -4,6 +4,8 @@ import time
 import torch
 import gradio as gr
 import langid
+import noisereduce as nr
+import soundfile as sf
 
 from openvoice import se_extractor
 from openvoice.api import BaseSpeakerTTS, ToneColorConverter
@@ -88,6 +90,33 @@ def validate_inputs(text: str, ref_audio: str, style: str):
     return problems
 
 
+def denoise_audio(input_path: str, output_path: str) -> str:
+    """
+    Applies noise reduction to an audio file.
+
+    Args:
+        input_path (str): Path to the input audio file.
+        output_path (str): Path to save the denoised audio file.
+
+    Returns:
+        str: The path to the denoised audio file.
+    """
+    try:
+        data, rate = sf.read(input_path)
+        # If stereo, convert to mono by averaging channels
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+        # Perform noise reduction with less aggressive settings
+        reduced_noise = nr.reduce_noise(y=data, sr=rate, prop_decrease=0.8)
+        sf.write(output_path, reduced_noise, rate)
+        return output_path
+    except Exception as e:
+        print(f"Could not denoise audio: {e}")
+        # Fallback to original audio if denoising fails
+        return input_path
+
+
+
 # -----------------------------
 # Inference Core
 # -----------------------------
@@ -126,10 +155,14 @@ def clone_voice(prompt: str, reference_audio: str, style: str, sample_choice: st
         tts_style = style
         language_tag = "English"
 
+    # Denoise the effective reference audio
+    denoised_ref_path = os.path.join(OUTPUT_DIR, f"denoised_{os.path.basename(effective_ref)}")
+    denoised_effective_ref = denoise_audio(effective_ref, denoised_ref_path)
+
     # Extract target speaker embedding
     try:
         target_se, _ = se_extractor.get_se(
-            effective_ref,
+            denoised_effective_ref,
             MODELS.converter,
             target_dir="processed",
             vad=True,
@@ -142,14 +175,19 @@ def clone_voice(prompt: str, reference_audio: str, style: str, sample_choice: st
     tts_model.tts(prompt, base_path, speaker=tts_style, language=language_tag)
 
     # Convert tone color
-    out_path = os.path.join(OUTPUT_DIR, "cloned.wav")
+    temp_out_path = os.path.join(OUTPUT_DIR, "cloned_temp.wav")
     MODELS.converter.convert(
         audio_src_path=base_path,
         src_se=source_se,
         tgt_se=target_se,
-        output_path=out_path,
+        output_path=temp_out_path,
         message="@MyShell",
     )
+
+    # Denoise the final output
+    out_path = os.path.join(OUTPUT_DIR, "cloned.wav")
+    denoise_audio(temp_out_path, out_path)
+
 
     elapsed = time.time() - t0
     info = (
@@ -183,16 +221,23 @@ def speech_to_speech(source_audio: str, target_ref_audio: str, target_sample_cho
     if problems:
         return "\n".join([f"[ERROR] {m}" for m in problems]), None, None, None
 
+    # Denoise both source and target audio
+    denoised_src_path = os.path.join(OUTPUT_DIR, f"denoised_{os.path.basename(effective_src)}")
+    denoised_tgt_path = os.path.join(OUTPUT_DIR, f"denoised_{os.path.basename(effective_tgt)}")
+    
+    denoised_effective_src = denoise_audio(effective_src, denoised_src_path)
+    denoised_effective_tgt = denoise_audio(effective_tgt, denoised_tgt_path)
+
     # Extract embeddings
     try:
         src_se, _ = se_extractor.get_se(
-            effective_src,
+            denoised_effective_src,
             MODELS.converter,
             target_dir="processed",
             vad=True,
         )
         tgt_se, _ = se_extractor.get_se(
-            effective_tgt,
+            denoised_effective_tgt,
             MODELS.converter,
             target_dir="processed",
             vad=True,
@@ -201,14 +246,18 @@ def speech_to_speech(source_audio: str, target_ref_audio: str, target_sample_cho
         return f"[ERROR] Failed to extract embeddings: {e}", None, None, None
 
     # Convert timbre using source content
-    out_path = os.path.join(OUTPUT_DIR, "s2s_cloned.wav")
+    temp_out_path = os.path.join(OUTPUT_DIR, "s2s_cloned_temp.wav")
     MODELS.converter.convert(
         audio_src_path=effective_src,
         src_se=src_se,
         tgt_se=tgt_se,
-        output_path=out_path,
+        output_path=temp_out_path,
         message="@MyShell",
     )
+
+    # Denoise the final output
+    out_path = os.path.join(OUTPUT_DIR, "s2s_cloned.wav")
+    denoise_audio(temp_out_path, out_path)
 
     elapsed = time.time() - t0
     info = f"Success. Speech→Speech | Duration={elapsed:.2f}s | Device={DEVICE}"
